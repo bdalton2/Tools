@@ -226,7 +226,9 @@ sub main
 				print "\t\tDoubly-verbose mode\n";
 				print "\t-q, --quiet\n";
 				print "\t\tSilent (quiet) mode\n";
-				print "\t-h, --harmless\n";
+				print "\t-h, --help\n";
+				print "\t\tShow this help screen\n";
+				print "\t-b, --begnign --harmless\n";
 				print "\t\tHarmless mode; don't modify existing files\n";
 				print "\t-r=DIR, --root=DIR\n";
 				print "\t\tSet the root path to monitor for incoming directories.\n";
@@ -264,7 +266,7 @@ sub main
 			{
 				$debuglevel = -1;
 			}
-			case ["-h", "--harmless"]
+			case ["-b", "--begnign", "--harmless"]
 			{
 				$harmless = "true";
 			}
