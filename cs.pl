@@ -4,6 +4,8 @@ use strict;
 use File::Copy;
 use File::Basename;
 use File::Path qw/make_path/;
+use Cwd;
+use Cwd qw/realpath/;
 use Switch;
 use Fcntl qw(:flock SEEK_END);
 
@@ -13,6 +15,7 @@ my $ZIPPATH = "/usr/bin/zip";
 my $UNZIPPATH = "/usr/bin/unzip";
 
 #DIRECTORIES
+my $scriptpath = "";
 my $inpath = ".";
 my $temppath = "/tmp";
 my $outpath = "./out";
@@ -47,6 +50,7 @@ my @curdirFileList;
 sub processRootDir
 {
 	my ($rootpath, $dirfilter, $filter) = @_;
+	$rootpath = realpath($rootpath) . "/";
 	
 	opendir ROOTDIR, $rootpath or die "Couldn't opern dir '$rootpath': $!";
 	
@@ -67,8 +71,8 @@ sub processRootDir
 		}
 		#CAN WE ZIP THE DIRECTORY?
 		@curdirFileList = ();
-		if($debuglevel > 1) { print "......Running subdirectory check with filter $filter\n"; }
-		if(checkSubDir("$rootpath$file/", $filter) == 0)
+		if($debuglevel > 1) { print "......Running subdirectory check with filter $filter on $rootpath$file\n"; }
+		if(checkSubDir("$rootpath$file/", "", $filter) == 0)
 		{
 			unless(@curdirFileList) { if($debuglevel > 0) { print "...No matching files found for \"$rootpath$file\". Skipping directory.\n"; } next; }
 			push(@commandList, @curdirFileList);
@@ -76,9 +80,11 @@ sub processRootDir
 			if($debuglevel > 0) { print "...Writing zip file $temppath$file.zip...\n"; }
 			if($debuglevel > 1) { print "......Command is: \"@commandList\""; }
 			#DIRECTORY IS READY FOR ZIPPING###
+			chdir("$rootpath$file");
 			unless(system(@commandList))
 			{
-				if($debuglevel > 0) { print "...Done.\nMoving zip file to output directory...\n"; }
+				chdir("$scriptpath");
+				if($debuglevel > 0) { print "...Done.\nMoving zip file to output directory... \n"; }
 				
 				if(move("$temppath$file.zip", "$outpath$file.zip"))
 				{
@@ -103,6 +109,11 @@ sub processRootDir
 			{
 				if($debuglevel > 0) { print "...ZIP COMMAND FAILED.\n"; }
 			}
+			chdir("$scriptpath");
+		}
+		else
+		{
+			if($debuglevel > 0) { print "...CheckSubDir failed.\n"; }
 		}
 	}
 
@@ -112,12 +123,13 @@ sub processRootDir
 
 
 ###################################################################
-## checkSubDir(DirPath, Filter)
+## checkSubDir(RootPath, DirPath, Filter)
 ## ---------------------------------
 ## COMPILE A LIST OF FILESIZES IN A SUBDIRECTORY, WAIT TWO SECONDS
 ## AND COMPARE THEM TO CURRENT FILESIZES [i.e. CHECK FILES ARE
 ## NOT BEING UPDATED]. RECURSES ON DIRECTORIES
 ## ... ARGUMENTS ...
+##    -- RootPath (The root directory)
 ##    -- DirPath (A directory path to check)
 ##    -- Filter (A filename regex filter to limit files/folders checked)
 ## ... RETURNS ...
@@ -127,7 +139,7 @@ sub processRootDir
 ###################################################################
 sub checkSubDir
 {
-	my ($dirpath, $filter) = @_;
+	my ($rootpath, $dirpath, $filter) = @_;
 	
 	my $originaldircount;
 	my %filesizes;
@@ -135,19 +147,21 @@ sub checkSubDir
 	
 	#BUILD A SIZELIST
 	my $dirhandle;
-	opendir $dirhandle, $dirpath or return 3;
+	opendir $dirhandle, "$rootpath$dirpath" or return 3;
 	while(my $file = readdir($dirhandle))
 	{
+		my $filepath = "$rootpath$dirpath$file";
+		
 		#IGNORE . DIRECTORIES OR FILES NOT CAUGHT IN OUR REGEX
 		if($file =~ /^\./) { next; }
-		if($filter ne "") { if($file !~ m/$filter/) { next; } }
+		if($filter ne "") { if($filepath !~ m/$filter/) { next; } }
 		
 		#IF IT'S A FILE, ADD ITS ORIGINAL SIZE TO THE SIZELIST
-		if(-e "$dirpath$file")
+		if(-e $filepath)
 		{
-			my $size = -s "$dirpath$file";
+			my $size = -s "$filepath";
 			$filesizes{$file}  = $size;
-			if($debuglevel > 1) { print "......\"$dirpath$file\" holds size: $size\n"; }
+			if($debuglevel > 1) { print "......\"$filepath\" holds size: $size\n"; }
 		}
 		#IF IT'S A DIRECTORY, SAVE IT FOR LATER
 		elsif (-d $file)
@@ -161,24 +175,26 @@ sub checkSubDir
 	#COMPARE THE SIZELIST
 	sleep($stablesleeplen);
 
-	opendir $dirhandle, $dirpath or return 3;
+	opendir $dirhandle, "$rootpath$dirpath" or return 3;
 	while(my $file = readdir($dirhandle))
 	{
+		my $filepath = "$rootpath$dirpath$file";
+		
 		if($file =~ /^\./) { next; }
 		if($filepattern ne "") { if($file !~ m/$filter/) { next; } }
 
-		if(-e "$dirpath$file")
+		if(-e "$filepath")
 		{
 			#QUIT IF THE FILE HAS BEEN CREATED OR RESIZED SINCE WE CHECKED LAST
 			if(!exists($filesizes{$file}))
 			{
-				if($debuglevel > 1) { print "......\"$dirpath$file\" has been created since check\n"; }
+				if($debuglevel > 1) { print "......\"$filepath\" has been created since check\n"; }
 				return 2;
 			}
 		
-			if($filesizes{$file} != -s "$dirpath$file")
+			if($filesizes{$file} != -s "$filepath")
 			{
-				if($debuglevel > 1) { print "......\"$dirpath$file\" fails filesize stability test\n"; }
+				if($debuglevel > 1) { print "......\"$filepath\" fails filesize stability test\n"; }
 				return 1;
 			}
 			
@@ -194,7 +210,7 @@ sub checkSubDir
 	foreach $dir (@directories)
 	{
 		#PASS A 1 UP THE CHAIN IF FOUND
-		if(my $retval = checkSubDir($dir, $filter)) { return $retval; }
+		if(my $retval = checkSubDir($rootpath, $dirpath . $dir, $filter)) { return $retval; }
 	}
 
 	return 0;
@@ -307,6 +323,7 @@ sub main
 	}
 
 	##APPEND TRAILING SLASH ONTO DIRECTORIES WHERE NEEDED
+	$scriptpath = getcwd();
 	if($inpath !~ m/.*\/$/) { $inpath .= "/"; }
 	if($temppath !~ m/.*\/$/) { $temppath .= "/"; }
 	if($outpath !~ m/.*\/$/) { $outpath .= "/"; }
