@@ -229,19 +229,26 @@ sub main
 				print "\t-h, --harmless\n";
 				print "\t\tHarmless mode; don't modify existing files\n";
 				print "\t-r=DIR, --root=DIR\n";
-				print "\t\tSet the root path to monitor for incoming directories\n";
+				print "\t\tSet the root path to monitor for incoming directories.\n";
+				print "\t\tDEFAULTS TO ./\n";
 				print "\t-t=DIR, --temppath=DIR\n";
-				print "\t\tSet the path to save temporary files into (i.e. generated zip files before copying)\n";
+				print "\t\tSet the path to save temporary files into (i.e. generated zip files before copying).\n";
+				print "\t\tDEFAULTS TO /tmp/\n";
 				print "\t-o=DIR, --outpath=DIR\n";
-				print "\t\tSet the output path (i.e. the path where the zip files will be copied to)\n";
+				print "\t\tSet the output path (i.e. the path where the zip files will be copied to).\n";
+				print "\t\tDEFAULTS TO ./out/\n";
 				print "\t-f=REGEX, --root-filter=REGEX\n";
 				print "\t\tApply a regex filter to the folders that will be monitored from the root directory.\n";
+				print "\t\tDEFAULTS TO \".*\"\n";
 				print "\t-s=REGEX, --subdirectory-filter=REGEX\n";
 				print "\t\tApply a regex filter to the files/folders under each monitored subdirectory.\n";
+				print "\t\tDEFAULTS TO \".*\"\n";
 				print "\t-d=TIME, --sleepdelay=TIME\n";
 				print "\t\tSet the delay between each execution of the main loop, in seconds (useful for daemons). Set to 0 to disable the loop.\n";
+				print "\t\tDEFAULTS TO 5\n";
 				print "\t-a=TIME, --stabledelay=TIME\n";
-				print "\t\tSet the delay between checking filesizes within each folder, in seconds.\n\n";
+				print "\t\tSet the delay between checking filesizes within each folder, in seconds.\n";
+				print "\t\tDEFAULTS TO 2\n\n";
 				
 				exit;
 			}
