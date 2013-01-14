@@ -12,17 +12,21 @@ use Fcntl qw(:flock SEEK_END);
 my $ZIPPATH = "/usr/bin/zip";
 my $UNZIPPATH = "/usr/bin/unzip";
 
+#DIRECTORIES
 my $inpath = ".";
-my $temppath = ".";
+my $temppath = "/tmp";
 my $outpath = "./out";
-#my $dirpattern = "[0-9]{8}\_.*";
+
+#FILTERING REGEXES
 my $dirpattern = ".*";
 my $filepattern = ".*";
-my $harmless = "false";
 
-my $debuglevel = 0;
-my $sleeplen = 5;
-my $stablesleeplen = 2;
+#GENERAL OPTIONS
+my $debuglevel = 0;				#DEBUGGING VERBOSITY [-1 == SILENT, 2 == VERY VERBOSE]
+my $sleeplen = 5;				#LENGTH TO WAIT BETWEEN MAIN LOOPS
+my $stablesleeplen = 2;			#LENGTH TO WAIT BETWEEN FILESIZE COMPARISONS IN A GIVEN FOLDER
+my $harmless = "false";			#WHETHER OR NOT TO PROHIBIT FILE MODIFICATIONS
+
 
 my @curdirFileList;
 
@@ -215,7 +219,30 @@ sub main
 		{
 			case ["-h", "--help"]
 			{
-				print "Usage:\ncs.pl [-v|-vv|-q] [-h|--harmless] [(-d|--sleepdelay)] [(-r|--root)=ROOPATH] [(-t|--temppath)=TEMPPATH] [(-o|--outpath)=OUTPUTPATH] [(-f|--root-filter)=FILTER [(-s|--subdirectory-filter)=SUBDIRECTORYFILTER]";
+				print "Usage:\ncs.pl [-v|-vv|-q] [-h] [-d] [-r=ROOTPATH] [-t=TEMPPATH] [-o=OUTPUTPATH] [-f=FILTER] [-s=SUBDIRECTORYFILTER]\n";
+				print "\t-v, --verbose\n";
+				print "\t\tVerbose mode\n";
+				print "\t-vv\n";
+				print "\t\tDoubly-verbose mode\n";
+				print "\t-q, --quiet\n";
+				print "\t\tSilent (quiet) mode\n";
+				print "\t-h, --harmless\n";
+				print "\t\tHarmless mode; don't modify existing files\n";
+				print "\t-r=DIR, --root=DIR\n";
+				print "\t\tSet the root path to monitor for incoming directories\n";
+				print "\t-t=DIR, --temppath=DIR\n";
+				print "\t\tSet the path to save temporary files into (i.e. generated zip files before copying)\n";
+				print "\t-o=DIR, --outpath=DIR\n";
+				print "\t\tSet the output path (i.e. the path where the zip files will be copied to)\n";
+				print "\t-f=REGEX, --root-filter=REGEX\n";
+				print "\t\tApply a regex filter to the folders that will be monitored from the root directory.\n";
+				print "\t-s=REGEX, --subdirectory-filter=REGEX\n";
+				print "\t\tApply a regex filter to the files/folders under each monitored subdirectory.\n";
+				print "\t-d=TIME, --sleepdelay=TIME\n";
+				print "\t\tSet the delay between each execution of the main loop, in seconds (useful for daemons). Set to 0 to disable the loop.\n";
+				print "\t-a=TIME, --stabledelay=TIME\n";
+				print "\t\tSet the delay between checking filesizes within each folder, in seconds.\n\n";
+				
 				exit;
 			}
 			case ["-v", "--verbose"]
@@ -295,7 +322,7 @@ sub main
 	open(SELF, "<", $0) or die "Cannot open $0 -- $!";
 	flock(SELF, LOCK_EX) or die "Already running";
 	
-	while(1)
+	while($sleeplen > 0)
 	{
 		if($debuglevel >= 0) { print "CHECKING DIRECTORIES...\n"; }
 		
