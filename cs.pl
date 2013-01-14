@@ -65,10 +65,8 @@ sub processRootDir
 		push(@commandList, "$temppath$file.zip");
 
 		#SKIP FILES IN THE ROOT DIRECTORY
-		if(-d $file)
-		{
-			next;
-		}
+		unless(-d "$rootpath$file") { next; }
+		
 		#CAN WE ZIP THE DIRECTORY?
 		@curdirFileList = ();
 		if($debuglevel > 1) { print "......Running subdirectory check with filter $filter on $rootpath$file\n"; }
@@ -78,7 +76,7 @@ sub processRootDir
 			push(@commandList, @curdirFileList);
 			
 			if($debuglevel > 0) { print "...Writing zip file $temppath$file.zip...\n"; }
-			if($debuglevel > 1) { print "......Command is: \"@commandList\""; }
+			if($debuglevel > 1) { print "......Command is: \"@commandList\"\n"; }
 			#DIRECTORY IS READY FOR ZIPPING###
 			chdir("$rootpath$file");
 			unless(system(@commandList))
@@ -156,18 +154,20 @@ sub checkSubDir
 		if($file =~ /^\./) { next; }
 		if($filter ne "") { if($filepath !~ m/$filter/) { next; } }
 		
+		#IF IT'S A DIRECTORY, SAVE IT FOR LATER
+		if(-d $filepath)
+		{
+			if($debuglevel > 1) { print "......Found directory \"$dirpath$file\"\n"; }
+			push(@directories, "$dirpath$file/");
+		}
 		#IF IT'S A FILE, ADD ITS ORIGINAL SIZE TO THE SIZELIST
-		if(-e $filepath)
+		elsif(-e $filepath)
 		{
 			my $size = -s "$filepath";
 			$filesizes{$file}  = $size;
 			if($debuglevel > 1) { print "......\"$filepath\" holds size: $size\n"; }
 		}
-		#IF IT'S A DIRECTORY, SAVE IT FOR LATER
-		elsif (-d $file)
-		{
-			push(@directories, "$dirpath$file/");
-		}
+		
 	}
 	close $dirhandle;
 
@@ -182,8 +182,9 @@ sub checkSubDir
 		
 		if($file =~ /^\./) { next; }
 		if($filepattern ne "") { if($file !~ m/$filter/) { next; } }
-
-		if(-e "$filepath")
+		
+		if(-d $filepath) {}
+		elsif(-e $filepath)
 		{
 			#QUIT IF THE FILE HAS BEEN CREATED OR RESIZED SINCE WE CHECKED LAST
 			if(!exists($filesizes{$file}))
@@ -210,7 +211,8 @@ sub checkSubDir
 	foreach $dir (@directories)
 	{
 		#PASS A 1 UP THE CHAIN IF FOUND
-		if(my $retval = checkSubDir($rootpath, $dirpath . $dir, $filter)) { return $retval; }
+		if($debuglevel > 1) { print "......Checking subdir $rootpath --> $dir\n"; }
+		if(my $retval = checkSubDir($rootpath, $dir, $filter)) { return $retval; }
 	}
 
 	return 0;
@@ -346,13 +348,15 @@ sub main
 	}
 
 	open(SELF, "<", $0) or die "Cannot open $0 -- $!";
-	flock(SELF, LOCK_EX) or die "Already running";
+	flock(SELF, LOCK_EX | LOCK_NB) or die "Already running";
 	
-	while($sleeplen > 0)
+	while(1)
 	{
 		if($debuglevel >= 0) { print "CHECKING DIRECTORIES...\n"; }
 		
 		processRootDir($inpath, $dirpattern, $filepattern);
+		
+		if($sleeplen == 0) { return; }
 		sleep($sleeplen);
 	}
 
