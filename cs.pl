@@ -9,6 +9,11 @@ use Cwd qw/realpath/;
 use Switch;
 use Fcntl qw(:flock SEEK_END);
 
+use constant ERROR_SUCCESS			=> 0;
+use constant WARNING_EMPTY_DIR 		=> 1;
+use constant ERROR_SIZE_MISMATCH 	=> 4;
+use constant ERROR_EXISTANCE_MISMATCH => 8;
+use constant ERROR_INVALID_HANDLE 	=> 16;
 
 
 my $ZIPPATH = "/usr/bin/zip";
@@ -29,6 +34,7 @@ my $debuglevel = 0;				#DEBUGGING VERBOSITY [-1 == SILENT, 2 == VERY VERBOSE]
 my $sleeplen = 5;				#LENGTH TO WAIT BETWEEN MAIN LOOPS
 my $stablesleeplen = 2;			#LENGTH TO WAIT BETWEEN FILESIZE COMPARISONS IN A GIVEN FOLDER
 my $harmless = "false";			#WHETHER OR NOT TO PROHIBIT FILE MODIFICATIONS
+my $cleanup = "true";			#WHETHER OR NOT TO DELETE EMPTY DIRECTORIES
 
 
 my @curdirFileList;
@@ -65,20 +71,29 @@ sub processRootDir
 		push(@commandList, "$temppath$file.zip");
 
 		#SKIP FILES IN THE ROOT DIRECTORY
-		unless(-d "$rootpath$file") { next; }
+		my $curdir = "$rootpath$file/";
+		unless(-d $curdir) { next; }
 		
 		#CAN WE ZIP THE DIRECTORY?
 		@curdirFileList = ();
-		if($debuglevel > 1) { print "......Running subdirectory check with filter $filter on $rootpath$file\n"; }
-		if(checkSubDir("$rootpath$file/", "", $filter) == 0)
+		if($debuglevel > 1) { print "......Running subdirectory check with filter $filter on $curdir\n"; }
+		my $retval = checkSubDir($curdir, "", $filter);
+		
+		#DELETE EMPTY DIRECTORY IF WE'VE BEEN TOLD TO
+		if(($retval == WARNING_EMPTY_DIR) && ($cleanup eq "true"))
 		{
-			unless(@curdirFileList) { if($debuglevel > 0) { print "...No matching files found for \"$rootpath$file\". Skipping directory.\n"; } next; }
+			if($debuglevel > 0) { print "...Cleaning empty directory \"$curdir\" as per request.\n"; }
+			rmdir($curdir);
+		}
+		elsif($retval == ERROR_SUCCESS)
+		{
+			unless(@curdirFileList) { if($debuglevel > 0) { print "...No matching files found for \"$curdir\". Skipping directory.\n"; } next; }
 			push(@commandList, @curdirFileList);
 			
 			if($debuglevel > 0) { print "...Writing zip file $temppath$file.zip...\n"; }
 			if($debuglevel > 1) { print "......Command is: \"@commandList\"\n"; }
 			#DIRECTORY IS READY FOR ZIPPING###
-			chdir("$rootpath$file");
+			chdir($curdir);
 			unless(system(@commandList))
 			{
 				chdir("$scriptpath");
@@ -94,11 +109,11 @@ sub processRootDir
 					my $delfile;
 					foreach $delfile (@curdirFileList)
 					{
-						if(unlink($delfile)) { if($debuglevel > 1) { print "......Deleted \"$delfile\"\n"; } }
-						else					 { if($debuglevel > 1) { print "......Couldn't delete \"$delfile\"\n"; }}
+						if(unlink("$curdir$delfile")) { if($debuglevel > 1) { print "......Deleted \"$curdir$delfile\"\n"; } }
+						else					 { if($debuglevel > 1) { print "......Couldn't delete \"$curdir$delfile\"\n"; }}
 						
 						#TRY TO DELETE THE DIRECTORY IF IT IS EMPTY
-						if(rmdir(dirname($delfile))) { if($debuglevel > 1) { print "......Deleted empty directory \"" . dirname($delfile) . "\"\n"; }}
+						if(rmdir(dirname("$curdir$delfile"))) { if($debuglevel > 1) { print "......Deleted empty directory \"" . dirname("$curdir$delfile") . "\"\n"; }}
 					}
 					
 				}
@@ -145,7 +160,7 @@ sub checkSubDir
 	
 	#BUILD A SIZELIST
 	my $dirhandle;
-	opendir $dirhandle, "$rootpath$dirpath" or return 3;
+	opendir $dirhandle, "$rootpath$dirpath" or return ERROR_INVALID_HANDLE;
 	while(my $file = readdir($dirhandle))
 	{
 		my $filepath = "$rootpath$dirpath$file";
@@ -171,51 +186,74 @@ sub checkSubDir
 	}
 	close $dirhandle;
 
-
-	#COMPARE THE SIZELIST
-	sleep($stablesleeplen);
-
-	opendir $dirhandle, "$rootpath$dirpath" or return 3;
-	while(my $file = readdir($dirhandle))
+	if(%filesizes)
 	{
-		my $filepath = "$rootpath$dirpath$file";
-		
-		if($file =~ /^\./) { next; }
-		if($filepattern ne "") { if($file !~ m/$filter/) { next; } }
-		
-		if(-d $filepath) {}
-		elsif(-e $filepath)
+		#COMPARE THE SIZELIST
+		sleep($stablesleeplen);
+
+		opendir $dirhandle, "$rootpath$dirpath" or return ERROR_INVALID_HANDLE;
+		while(my $file = readdir($dirhandle))
 		{
-			#QUIT IF THE FILE HAS BEEN CREATED OR RESIZED SINCE WE CHECKED LAST
-			if(!exists($filesizes{$file}))
-			{
-				if($debuglevel > 1) { print "......\"$filepath\" has been created since check\n"; }
-				return 2;
-			}
+			my $filepath = "$rootpath$dirpath$file";
 		
-			if($filesizes{$file} != -s "$filepath")
+			if($file =~ /^\./) { next; }
+			if($filepattern ne "") { if($file !~ m/$filter/) { next; } }
+		
+			if(-d $filepath) {}
+			elsif(-e $filepath)
 			{
-				if($debuglevel > 1) { print "......\"$filepath\" fails filesize stability test\n"; }
-				return 1;
-			}
+				#QUIT IF THE FILE HAS BEEN CREATED OR RESIZED SINCE WE CHECKED LAST
+				if(!exists($filesizes{$file}))
+				{
+					if($debuglevel > 1) { print "......\"$filepath\" has been created since check\n"; }
+					return ERROR_EXISTANCE_MISMATCH;
+				}
+		
+				if($filesizes{$file} != -s "$filepath")
+				{
+					if($debuglevel > 1) { print "......\"$filepath\" fails filesize stability test\n"; }
+					return ERROR_SIZE_MISMATCH;
+				}
 			
-			push(@curdirFileList, "$dirpath$file");
+				push(@curdirFileList, "$dirpath$file");
+			}
+		}
+		closedir $dirhandle;
+	}
+	
+	if(@directories)
+	{
+		#IF WE MADE IT HERE, THE FILES IN THIS DIRECTORY ARE RELATIVELY STABLE (READ: PROBABLY FINISHED UPLOADING)
+		#CHECK ON SUBDIRECTORIES IF WE HAVE THEM
+		my $dir;
+		foreach $dir (@directories)
+		{
+			#PASS A 1 UP THE CHAIN IF FOUND
+			if($debuglevel > 1) { print "......Checking subdir $rootpath --> $dir\n"; }
+			if(my $retval = checkSubDir($rootpath, $dir, $filter))
+			{
+				#DELETE EMPTY DIRECTORIES IF WE'VE BEEN TOLD TO
+				if(($retval == WARNING_EMPTY_DIR) && ($cleanup eq "true"))
+				{
+					if($debuglevel > 0) { print "...Cleaning empty directory \"$rootpath$dir\" as per request.\n"; }
+					rmdir("$rootpath$dir");
+					delete $directories[$dir];
+				}
+				else
+				{
+					return $retval;
+				}
+			}
 		}
 	}
-	closedir $dirhandle;
-
-
-	#IF WE MADE IT HERE, THE FILES IN THIS DIRECTORY ARE RELATIVELY STABLE (READ: PROBABLY FINISHED UPLOADING)
-	#CHECK ON SUBDIRECTORIES IF WE HAVE THEM
-	my $dir;
-	foreach $dir (@directories)
+	
+	#IF THIS DIRECTORY IS EMPTY
+	if(!@directories && !%filesizes)
 	{
-		#PASS A 1 UP THE CHAIN IF FOUND
-		if($debuglevel > 1) { print "......Checking subdir $rootpath --> $dir\n"; }
-		if(my $retval = checkSubDir($rootpath, $dir, $filter)) { return $retval; }
+		return WARNING_EMPTY_DIR;
 	}
-
-	return 0;
+	
+	return ERROR_SUCCESS;
 }
 
 
@@ -239,15 +277,17 @@ sub main
 			{
 				print "Usage:\ncs.pl [-v|-vv|-q] [-h] [-d] [-r=ROOTPATH] [-t=TEMPPATH] [-o=OUTPUTPATH] [-f=FILTER] [-s=SUBDIRECTORYFILTER]\n";
 				print "\t-v, --verbose\n";
-				print "\t\tVerbose mode\n";
+				print "\t\tVerbose mode.\n";
 				print "\t-vv\n";
-				print "\t\tDoubly-verbose mode\n";
+				print "\t\tVery-verbose mode.\n";
 				print "\t-q, --quiet\n";
-				print "\t\tSilent (quiet) mode\n";
+				print "\t\tSilent (quiet) mode.\n";
 				print "\t-h, --help\n";
-				print "\t\tShow this help screen\n";
+				print "\t\tShow this help screen.\n";
 				print "\t-b, --begnign --harmless\n";
-				print "\t\tHarmless mode; don't modify existing files\n";
+				print "\t\tHarmless mode; don't modify existing files. Mutually exclusive with --cleanup.\n";
+				print "\t-c, --cleanup\n";
+				print "\t\tDelete empty directories. Mutually exclusive with --harmless.\n";
 				print "\t-r=DIR, --root=DIR\n";
 				print "\t\tSet the root path to monitor for incoming directories.\n";
 				print "\t\tDEFAULTS TO ./\n";
@@ -287,6 +327,12 @@ sub main
 			case ["-b", "--begnign", "--harmless"]
 			{
 				$harmless = "true";
+				$cleanup = "false";
+			}
+			case ["-c", "--cleanup"]
+			{
+				$cleanup = "true";
+				$harmless = "false";
 			}
 			case ["-r", "--root"]
 			{
